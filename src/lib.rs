@@ -1,1 +1,2 @@
-pub mod spin_lock;
+pub mod channels;
+pub mod locks;

@@ -1,8 +1,12 @@
 use std::thread;
 
-use atomics_and_locks::spin_lock::SpinLock;
+use atomics_and_locks::locks::spin_lock::SpinLock;
 
 fn main() {
+    spin_lock();
+}
+
+fn spin_lock() {
     let spin = SpinLock::new(Vec::new());
 
     thread::scope(|scope| {
