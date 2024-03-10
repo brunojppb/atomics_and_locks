@@ -1,7 +1,21 @@
-use atomics_and_locks::spin_lock;
+use std::thread;
+
+use atomics_and_locks::spin_lock::SpinLock;
 
 fn main() {
-    println!("Hello, world!");
-    let result = spin_lock::get_data();
-    println!("Result: {:?}", result.value);
+    let spin = SpinLock::new(Vec::new());
+
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            spin.lock().push(1);
+        });
+
+        scope.spawn(|| {
+            spin.lock().push(2);
+        });
+    });
+
+    let list = spin.lock();
+    println!("List value: {:?}", list.as_slice());
+    assert!(list.as_slice() == [1, 2] || list.as_slice() == [2, 1])
 }
