@@ -1,9 +1,28 @@
 use std::thread;
 
-use atomics_and_locks::locks::spin_lock::SpinLock;
+use atomics_and_locks::{channels::one_shot_channel::OneShotChannel, locks::spin_lock::SpinLock};
 
 fn main() {
     spin_lock();
+    one_shot_channel();
+}
+
+fn one_shot_channel() {
+    let channel = OneShotChannel::new();
+    let t = thread::current();
+
+    thread::scope(|s| {
+        s.spawn(|| {
+            channel.send("Hi there!");
+            t.unpark();
+        });
+
+        while !channel.is_ready() {
+            thread::park();
+        }
+
+        assert_eq!(channel.receive(), "Hi there!");
+    });
 }
 
 fn spin_lock() {
