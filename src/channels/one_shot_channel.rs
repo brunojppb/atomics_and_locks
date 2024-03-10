@@ -1,10 +1,14 @@
-use std::sync::atomic::Ordering;
-use std::{cell::UnsafeCell, mem::MaybeUninit, sync::atomic::AtomicBool};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::{cell::UnsafeCell, mem::MaybeUninit};
+
+const EMPTY: u8 = 0;
+const WRITING: u8 = 1;
+const READY: u8 = 2;
+const READING: u8 = 3;
 
 pub struct OneShotChannel<T> {
     message: UnsafeCell<MaybeUninit<T>>,
-    ready: AtomicBool,
-    in_use: AtomicBool,
+    state: AtomicU8,
 }
 
 // This allows us to make our UnsafeCell happy
@@ -17,35 +21,46 @@ impl<T> OneShotChannel<T> {
     pub const fn new() -> Self {
         Self {
             message: UnsafeCell::new(MaybeUninit::uninit()),
-            ready: AtomicBool::new(false),
-            in_use: AtomicBool::new(false),
+            state: AtomicU8::new(EMPTY),
         }
     }
 
     /// # Panics when trying to send more than one message at once
     pub fn send(&self, message: T) {
-        if self.in_use.swap(true, Ordering::Relaxed) {
+        if self
+            .state
+            .compare_exchange(EMPTY, WRITING, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
             panic!("A message is already being sent! Can't send more than one message at once!");
         }
         unsafe { (*self.message.get()).write(message) };
-        self.ready.store(true, Ordering::Release);
+        self.state.store(READY, Ordering::Release);
     }
 
     pub fn is_ready(&self) -> bool {
-        self.ready.load(Ordering::Relaxed)
+        self.state.load(Ordering::Relaxed) == READY
     }
 
     /// Panics if no message is available yet,
     /// or if the message was already consumed.
     /// Always use is_ready() first.
     pub fn receive(&self) -> T {
-        if !self.ready.swap(false, Ordering::Acquire) {
+        if self
+            .state
+            .compare_exchange(READY, READING, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
             panic!("No message available!");
         }
 
         // Safety: We've just cheked (and reset) the ready flag,
         // so at this point we are guaranteed to have a value ready
-        unsafe { (*self.message.get()).assume_init_read() }
+        unsafe {
+            let v = (*self.message.get()).assume_init_read();
+            self.state.store(EMPTY, Ordering::Release);
+            v
+        }
     }
 }
 
@@ -73,9 +88,14 @@ impl<T> OneShotChannel<T> {
 /// UnsafeCell, through UnsafeCell::get_mut.
 impl<T> Drop for OneShotChannel<T> {
     fn drop(&mut self) {
-        if *self.ready.get_mut() {
+        println!("trying to drop OneShotChannel");
+        if *self.state.get_mut() == READY {
             println!("Dropping OneShot channel");
             unsafe { self.message.get_mut().assume_init_drop() }
+        } else {
+            println!(
+                "Only needs to drop if holding some value. UnsafeCell holds no value. moving on..."
+            );
         }
     }
 }

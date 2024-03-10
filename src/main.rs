@@ -18,10 +18,15 @@ fn one_shot_channel() {
         });
 
         while !channel.is_ready() {
+            println!("Parking main thread...");
             thread::park();
         }
 
+        println!("Unparking...");
+
         assert_eq!(channel.receive(), "Hi there!");
+
+        channel.send("Test dropping...");
     });
 }
 
