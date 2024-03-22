@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering::*;
+use std::sync::atomic::{fence, Ordering::*};
 use std::{ops::Deref, ptr::NonNull, sync::atomic::AtomicUsize};
 
 struct ArcData<T> {
@@ -20,6 +20,17 @@ impl<T> Arc<T> {
                 ref_count: AtomicUsize::new(1),
                 data,
             }))),
+        }
+    }
+
+    pub fn get_mut(arc: &mut Self) -> Option<&mut T> {
+        if arc.data().ref_count.load(Relaxed) == 1 {
+            fence(Acquire);
+            // Safety: Nothing else can access the data, since
+            // there is only one Arc, to which we have exclusive access
+            unsafe { Some(&mut arc.ptr.as_mut().data) }
+        } else {
+            None
         }
     }
 
