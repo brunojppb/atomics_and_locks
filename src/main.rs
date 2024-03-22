@@ -1,7 +1,9 @@
 use std::thread;
 
 use atomics_and_locks::{
-    channels::{one_shot_channel::OneShotChannel, sender_receiver::channel},
+    channels::{
+        one_shot_channel::OneShotChannel, sender_receiver::channel, sender_receiver_borrow,
+    },
     locks::spin_lock::SpinLock,
 };
 
@@ -9,6 +11,7 @@ fn main() {
     spin_lock();
     one_shot_channel();
     send_receiver_channel();
+    send_receive_channel_borrow();
 }
 
 fn one_shot_channel() {
@@ -67,4 +70,21 @@ fn send_receiver_channel() {
 
         assert_eq!(rx.receive(), "Hi there!");
     })
+}
+
+fn send_receive_channel_borrow() {
+    let mut channel = sender_receiver_borrow::Channel::new();
+    thread::scope(|s| {
+        let (tx, rx) = channel.split();
+        let t = thread::current();
+        s.spawn(move || {
+            tx.send("Hi there!");
+            t.unpark();
+        });
+
+        while !rx.is_ready() {
+            thread::park();
+        }
+        assert_eq!(rx.receive(), "Hi there!");
+    });
 }
