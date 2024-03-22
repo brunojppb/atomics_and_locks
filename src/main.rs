@@ -73,18 +73,19 @@ fn send_receiver_channel() {
 }
 
 fn send_receive_channel_borrow() {
+    println!("######## send_receive_channel_borrow ########");
     let mut channel = sender_receiver_borrow::Channel::new();
     thread::scope(|s| {
         let (tx, rx) = channel.split();
-        let t = thread::current();
+
         s.spawn(move || {
+            println!("Sending msg");
             tx.send("Hi there!");
-            t.unpark();
         });
 
-        while !rx.is_ready() {
-            thread::park();
-        }
-        assert_eq!(rx.receive(), "Hi there!");
+        println!("Trying to receive");
+        let v = rx.receive();
+        println!("Value acquired");
+        assert_eq!(v, "Hi there!");
     });
 }
