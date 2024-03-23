@@ -48,11 +48,36 @@ impl<T> Arc<T> {
             None
         }
     }
+
+    pub fn downgrade(arc: &Self) -> Weak<T> {
+        arc.weak.clone()
+    }
 }
 
 impl<T> Weak<T> {
     fn data(&self) -> &ArcData<T> {
         unsafe { self.ptr.as_ref() }
+    }
+
+    pub fn upgrade(&self) -> Option<Arc<T>> {
+        let mut n = self.data().data_ref_count.load(Relaxed);
+        loop {
+            if n == 0 {
+                return None;
+            }
+
+            assert!(n <= usize::MAX / 2);
+
+            if let Err(e) =
+                self.data()
+                    .data_ref_count
+                    .compare_exchange_weak(n, n + 1, Relaxed, Relaxed)
+            {
+                n = e;
+                continue;
+            }
+            return Some(Arc { weak: self.clone() });
+        }
     }
 }
 
@@ -113,12 +138,20 @@ mod test {
     use super::Arc;
 
     static NUM_DROPS: AtomicUsize = AtomicUsize::new(0);
+    static NUM_WEEK_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     struct DetectDrop;
+    struct DetectWeakDrop;
 
     impl Drop for DetectDrop {
         fn drop(&mut self) {
             NUM_DROPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for DetectWeakDrop {
+        fn drop(&mut self) {
+            NUM_WEEK_DROPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -147,5 +180,33 @@ mod test {
         // now y should be gone
         // and the underlying tuple should be completely gone
         assert_eq!(NUM_DROPS.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn test_weak_count() {
+        // Create an Arc with two weak pointers.
+        let x = Arc::new(("hello", DetectWeakDrop));
+        let y = Arc::downgrade(&x);
+        let z = Arc::downgrade(&x);
+
+        let t = std::thread::spawn(move || {
+            // Weak pointer should be upgradable at this point.
+            let y = y.upgrade().unwrap();
+            assert_eq!(y.0, "hello");
+        });
+        assert_eq!(x.0, "hello");
+        t.join().unwrap();
+
+        // The data shouldn't be dropped yet,
+        // and the weak pointer should be upgradable.
+        assert_eq!(NUM_WEEK_DROPS.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!(z.upgrade().is_some());
+
+        drop(x);
+
+        // Now, the data should be dropped, and the
+        // weak pointer should no longer be upgradable.
+        assert_eq!(NUM_WEEK_DROPS.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(z.upgrade().is_none());
     }
 }
